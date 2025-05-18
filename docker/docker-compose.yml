@@ -1,0 +1,345 @@
+version: "3.9"
+
+####################
+# NETWORK & VOLUMES
+####################
+networks:
+  gvm_net:
+
+volumes:
+  # Greenbone
+  gpg_data_vol: {}
+  scap_data_vol: {}
+  cert_data_vol: {}
+  data_objects_vol: {}
+  gvmd_data_vol: {}
+  psql_data_vol: {}
+  vt_data_vol: {}
+  notus_data_vol: {}
+  psql_socket_vol: {}
+  gvmd_socket_vol: {}
+  ospd_openvas_socket_vol: {}
+  redis_socket_vol: {}
+  openvas_data_vol: {}
+  openvas_log_data_vol: {}
+  # DefectDojo
+  defectdojo_postgres: {}
+  defectdojo_media: {}
+  defectdojo_redis: {}
+
+####################
+# SERVICES
+####################
+services:
+  ############
+  # GREENBONE
+  ############
+  vulnerability-tests:
+    image: registry.community.greenbone.net/community/vulnerability-tests
+    environment:
+      FEED_RELEASE: "${GVM_FEED_RELEASE}"
+    volumes:
+      - vt_data_vol:/mnt
+    networks: [gvm_net]
+
+  notus-data:
+    image: registry.community.greenbone.net/community/notus-data
+    volumes:
+      - notus_data_vol:/mnt
+    networks: [gvm_net]
+
+  scap-data:
+    image: registry.community.greenbone.net/community/scap-data
+    volumes:
+      - scap_data_vol:/mnt
+    networks: [gvm_net]
+
+  cert-bund-data:
+    image: registry.community.greenbone.net/community/cert-bund-data
+    volumes:
+      - cert_data_vol:/mnt
+    networks: [gvm_net]
+
+  dfn-cert-data:
+    image: registry.community.greenbone.net/community/dfn-cert-data
+    volumes:
+      - cert_data_vol:/mnt
+    depends_on:
+      cert-bund-data:
+        condition: service_completed_successfully
+    networks: [gvm_net]
+
+  data-objects:
+    image: registry.community.greenbone.net/community/data-objects
+    environment:
+      FEED_RELEASE: "${GVM_FEED_RELEASE}"
+    volumes:
+      - data_objects_vol:/mnt
+    networks: [gvm_net]
+
+  report-formats:
+    image: registry.community.greenbone.net/community/report-formats
+    environment:
+      FEED_RELEASE: "${GVM_FEED_RELEASE}"
+    volumes:
+      - data_objects_vol:/mnt
+    depends_on:
+      data-objects:
+        condition: service_completed_successfully
+    networks: [gvm_net]
+
+  gpg-data:
+    image: registry.community.greenbone.net/community/gpg-data
+    volumes:
+      - gpg_data_vol:/mnt
+    networks: [gvm_net]
+
+  redis-server:
+    image: registry.community.greenbone.net/community/redis-server
+    restart: on-failure
+    volumes:
+      - redis_socket_vol:/run/redis/
+    networks: [gvm_net]
+
+  pg-gvm:
+    image: registry.community.greenbone.net/community/pg-gvm:stable
+    restart: on-failure
+    volumes:
+      - psql_data_vol:/var/lib/postgresql
+      - psql_socket_vol:/var/run/postgresql
+    networks: [gvm_net]
+
+  gvmd:
+    image: registry.community.greenbone.net/community/gvmd:stable
+    restart: on-failure
+    volumes:
+      - gvmd_data_vol:/var/lib/gvm
+      - scap_data_vol:/var/lib/gvm/scap-data/
+      - cert_data_vol:/var/lib/gvm/cert-data
+      - data_objects_vol:/var/lib/gvm/data-objects/gvmd
+      - vt_data_vol:/var/lib/openvas/plugins
+      - psql_data_vol:/var/lib/postgresql
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+      - psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm:
+        condition: service_started
+      scap-data:
+        condition: service_completed_successfully
+      cert-bund-data:
+        condition: service_completed_successfully
+      dfn-cert-data:
+        condition: service_completed_successfully
+      data-objects:
+        condition: service_completed_successfully
+      report-formats:
+        condition: service_completed_successfully
+    networks: [gvm_net]
+
+  gsa:
+    image: registry.community.greenbone.net/community/gsa:stable
+    restart: on-failure
+    ports:
+      - "${GSA_BIND_IP}:9392:80"
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+    depends_on: [gvmd]
+    networks: [gvm_net]
+
+  configure-openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    volumes:
+      - openvas_data_vol:/mnt
+      - openvas_log_data_vol:/var/log/openvas
+    command: |
+      /bin/sh -c 'printf "table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n" > /mnt/openvas.conf && \
+      sed "s/127/128/" /etc/openvas/openvas_log.conf | sed "s/gvm/openvas/" > /mnt/openvas_log.conf && \
+      chmod 644 /mnt/openvas.conf /mnt/openvas_log.conf && \
+      touch /var/log/openvas/openvas.log && chmod 666 /var/log/openvas/openvas.log'
+    networks: [gvm_net]
+
+  openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    restart: on-failure
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+    command: |
+      /bin/sh -c 'cat /etc/openvas/openvas.conf && tail -f /var/log/openvas/openvas.log'
+    depends_on:
+      configure-openvas:
+        condition: service_completed_successfully
+    networks: [gvm_net]
+
+  openvasd:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    restart: on-failure
+    environment:
+      OPENVASD_MODE: service_notus
+      GNUPGHOME: /etc/openvas/gnupg
+      LISTENING: 0.0.0.0:80
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+      - gpg_data_vol:/etc/openvas/gnupg
+      - notus_data_vol:/var/lib/notus
+    depends_on:
+      vulnerability-tests:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+      gpg-data:
+        condition: service_completed_successfully
+    networks:
+      gvm_net:
+        aliases: [openvasd]
+
+  ospd-openvas:
+    image: registry.community.greenbone.net/community/ospd-openvas:stable
+    restart: on-failure
+    hostname: ospd-openvas.local
+    cap_add: [NET_ADMIN, NET_RAW]
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    command:
+      ["ospd-openvas","-f","--config","/etc/gvm/ospd-openvas.conf","--notus-feed-dir","/var/lib/notus/advisories","-m","666"]
+    volumes:
+      - gpg_data_vol:/etc/openvas/gnupg
+      - vt_data_vol:/var/lib/openvas/plugins
+      - notus_data_vol:/var/lib/notus
+      - ospd_openvas_socket_vol:/run/ospd
+      - redis_socket_vol:/run/redis/
+      - openvas_data_vol:/etc/openvas/
+      - openvas_log_data_vol:/var/log/openvas
+    depends_on:
+      redis-server:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+    networks: [gvm_net]
+
+  gvm-tools:
+    image: registry.community.greenbone.net/community/gvm-tools
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+    depends_on: [gvmd, ospd-openvas]
+    networks: [gvm_net]
+
+  #############
+  # DEFECTDOJO
+  #############
+  nginx:
+    build:
+      context: ./ # assume Dockerfiles are in project root
+      dockerfile: "Dockerfile.nginx-${DEFECT_DOJO_OS}"
+    image: defectdojo/defectdojo-nginx:${NGINX_VERSION}
+    depends_on: [uwsgi]
+    environment:
+      NGINX_METRICS_ENABLED: "${NGINX_METRICS_ENABLED}"
+      DD_UWSGI_HOST: uwsgi
+      DD_UWSGI_PORT: 3031
+    volumes:
+      - defectdojo_media:/usr/share/nginx/html/media
+    ports:
+      - target: 8080
+        published: ${DD_PORT}
+        mode: host
+      - target: 8443
+        published: ${DD_TLS_PORT}
+        mode: host
+
+  uwsgi:
+    build:
+      context: ./
+      dockerfile: "Dockerfile.django-${DEFECT_DOJO_OS}"
+      target: django
+    image: defectdojo/defectdojo-django:${DJANGO_VERSION}
+    depends_on: [postgres]
+    entrypoint:
+      ["/wait-for-it.sh","postgres:${DD_DATABASE_PORT}", "-t","30","--","/entrypoint-uwsgi.sh"]
+    environment:
+      DD_DEBUG: "False"
+      DD_DJANGO_METRICS_ENABLED: "${DD_DJANGO_METRICS_ENABLED}"
+      DD_ALLOWED_HOSTS: "${DD_ALLOWED_HOSTS}"
+      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_CELERY_BROKER_URL: ${DD_CELERY_BROKER_URL}
+      DD_SECRET_KEY: ${DD_SECRET_KEY}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY}
+      DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT}"
+    volumes:
+      - ./docker/extra_settings:/app/docker/extra_settings
+      - defectdojo_media:${DD_MEDIA_ROOT}
+    networks: [gvm_net]
+
+  celerybeat:
+    image: defectdojo/defectdojo-django:${DJANGO_VERSION}
+    depends_on: [postgres, redis]
+    entrypoint:
+      ["/wait-for-it.sh","postgres:${DD_DATABASE_PORT}", "-t","30","--","/entrypoint-celery-beat.sh"]
+    environment:
+      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_CELERY_BROKER_URL: ${DD_CELERY_BROKER_URL}
+      DD_SECRET_KEY: ${DD_SECRET_KEY}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY}
+      DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT}"
+    volumes:
+      - ./docker/extra_settings:/app/docker/extra_settings
+    networks: [gvm_net]
+
+  celeryworker:
+    image: defectdojo/defectdojo-django:${DJANGO_VERSION}
+    depends_on: [postgres, redis]
+    entrypoint:
+      ["/wait-for-it.sh","postgres:${DD_DATABASE_PORT}", "-t","30","--","/entrypoint-celery-worker.sh"]
+    environment:
+      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_CELERY_BROKER_URL: ${DD_CELERY_BROKER_URL}
+      DD_SECRET_KEY: ${DD_SECRET_KEY}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY}
+      DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT}"
+    volumes:
+      - ./docker/extra_settings:/app/docker/extra_settings
+      - defectdojo_media:${DD_MEDIA_ROOT}
+    networks: [gvm_net]
+
+  initializer:
+    image: defectdojo/defectdojo-django:${DJANGO_VERSION}
+    depends_on: [postgres]
+    entrypoint:
+      ["/wait-for-it.sh","postgres:${DD_DATABASE_PORT}","--","/entrypoint-initializer.sh"]
+    environment:
+      DD_DATABASE_URL: ${DD_DATABASE_URL}
+      DD_ADMIN_USER: ${DD_ADMIN_USER}
+      DD_ADMIN_MAIL: ${DD_ADMIN_MAIL}
+      DD_ADMIN_FIRST_NAME: ${DD_ADMIN_FIRST_NAME}
+      DD_ADMIN_LAST_NAME: ${DD_ADMIN_LAST_NAME}
+      DD_INITIALIZE: "true"
+      DD_SECRET_KEY: ${DD_SECRET_KEY}
+      DD_CREDENTIAL_AES_256_KEY: ${DD_CREDENTIAL_AES_256_KEY}
+      DD_DATABASE_READINESS_TIMEOUT: "${DD_DATABASE_READINESS_TIMEOUT}"
+    volumes:
+      - ./docker/extra_settings:/app/docker/extra_settings
+    networks: [gvm_net]
+
+  postgres:
+    image: postgres:17.4-alpine
+    environment:
+      POSTGRES_DB: ${DD_DATABASE_NAME}
+      POSTGRES_USER: ${DD_DATABASE_USER}
+      POSTGRES_PASSWORD: ${DD_DATABASE_PASSWORD}
+    volumes:
+      - defectdojo_postgres:/var/lib/postgresql/data
+    networks: [gvm_net]
+
+  redis:
+    image: redis:7.2.8-alpine
+    volumes:
+      - defectdojo_redis:/data
+    networks: [gvm_net]
