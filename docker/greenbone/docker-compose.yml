@@ -9,7 +9,7 @@ services:
 
     ports:
       - "8080:9392"
-
+      - "9390:9390"       # puerto para la API de OpenVAS
     environment:
       - PASSWORD=admin
       - USERNAME=admin
