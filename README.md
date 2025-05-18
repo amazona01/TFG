@@ -10,9 +10,7 @@ este proyecto orquesta herramientas de seguridad para:
 - Generar informes
 
 ## ✨ Características
-- **Automatización completa** mediante Bash/Python + Docker‑Compose  
-- **Paralelización** de escaneos con `asyncio`  
-- **Informes Jinja2** exportados en Markdown/HTML  
+- **Automatización completa** mediante Bash/Python + Docker‑Compose    
 - **Coste cero**: todo software libre  
 - **Portabilidad**: imágenes Docker listadas en `docker/`  
 
