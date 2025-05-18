@@ -5,9 +5,9 @@ Automatización de tareas de pentesting basada en contenedores (Kali Linux).
 
 ## 📝 Descripción
 este proyecto orquesta herramientas de seguridad para:
-- Escanear redes y puertos  
-- Detectar y gestionar vulnerabilidades  
-- Generar informes reproducibles
+- Escanear redes y puertos 
+- Detectar y gestionar vulnerabilidades  
+- Generar informes reproducibles
 
 ## ✨ Características
 - **Automatización completa** mediante Bash/Python + Docker‑Compose  
