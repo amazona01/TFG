@@ -1,0 +1,35 @@
+services:
+  openvas:
+    image: immauss/openvas:latest
+    container_name: openvas
+
+    # ─────────── Seguridad ───────────
+    security_opt:
+      - seccomp:unconfined   # ← sin perfil seccomp
+
+    ports:
+      - "8080:9392"
+
+    environment:
+      - PASSWORD=admin
+      - USERNAME=admin
+      - RELAYHOST=172.17.0.1
+      - SMTPPORT=25
+      - REDISDBS=512      # número de bases Redis
+      - QUIET=false       # mostrar logs de sincronización
+      - NEWDB=false       # crear DB en blanco
+      - SKIPSYNC=true     # omitir sincronización al arrancar
+      - RESTORE=false
+      - DEBUG=false
+      - HTTPS=false
+      - GMP=9390          # habilitar GMP
+
+    volumes:
+      - openvas:/data
+
+volumes:
+  openvas:
+
+
+
+  

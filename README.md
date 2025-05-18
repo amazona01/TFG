@@ -26,4 +26,5 @@ este proyecto orquesta herramientas de seguridad para:
 git clone https://github.com/amazona01/TFG
 cd TFG/docker
 docker compose up -d
+docker compose logs initializer | grep "Admin password:"
 ```
